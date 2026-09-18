@@ -12,22 +12,13 @@ def transform_cv_to_pyglet(x_cv, y_cv, cam_w, cam_h, win_w, win_h):
         1. Aplica efecto espejo horizontal: x_flipped = cam_w - x_cv.
         2. Invierte el eje Y para alinear el origen abajo-izquierda: y_inverted = cam_h - y_cv.
         3. Escala proporcionalmente las coordenadas al tamaño de la ventana de Pyglet (win_w, win_h).
-        
-    POR QUÉ:
-        OpenCV posiciona el (0,0) en la esquina superior izquierda (matriz de imagen), mientras que Pyglet
-        utiliza el sistema cartesiano estándar donde (0,0) está en la esquina inferior izquierda.
-        El efecto espejo es imprescindible para una interacción natural del usuario frente a la webcam.
     """
     if cam_w <= 0 or cam_h <= 0:
         return 0.0, 0.0
 
-    # 1. Flip horizontal
     x_flipped = cam_w - x_cv
-    
-    # 2. Inversión de eje Y (Top-Left a Bottom-Left)
     y_inverted = cam_h - y_cv
     
-    # 3. Escalado a la ventana de Pyglet
     x_py = (x_flipped / float(cam_w)) * float(win_w)
     y_py = (y_inverted / float(cam_h)) * float(win_h)
     
@@ -36,18 +27,7 @@ def transform_cv_to_pyglet(x_cv, y_cv, cam_w, cam_h, win_w, win_h):
 
 def process_keypoints(keypoints_list, cam_w, cam_h, win_w, win_h, conf_threshold=0.5):
     """
-    Procesa la lista completa de 17 keypoints extraídos por YOLOv8.
-    
-    QUÉ HACE:
-        Mapea cada tupla (x, y, confidence) aplicando la conversión de coordenadas
-        y retorna una lista estructurada donde cada punto indica su validez según el umbral de confianza.
-        
-    POR QUÉ:
-        Permite que el renderizador maneje cuerpos completos o parciales de forma homogénea,
-        marcando como no válidos (valid=False) los puntos con baja confianza o fuera de encuadre.
-        
-    Returns:
-        dict: Diccionario mapeado {index: {"x": float, "y": float, "conf": float, "valid": bool}}
+    Procesa la lista de 17 keypoints para una única persona.
     """
     transformed = {}
     
@@ -66,3 +46,25 @@ def process_keypoints(keypoints_list, cam_w, cam_h, win_w, win_h, conf_threshold
         }
         
     return transformed
+
+
+def process_multi_person_keypoints(persons_keypoints_list, cam_w, cam_h, win_w, win_h, conf_threshold=0.5):
+    """
+    Procesa múltiples personas detectadas en la toma.
+    
+    QUÉ HACE:
+        Mapea cada lista de 17 keypoints individual mediante process_keypoints.
+        
+    POR QUÉ:
+        Permite transformar de forma limpia y homogénea N conjuntos de keypoints para su posterior renderizado.
+        
+    Returns:
+        list: Lista de diccionarios [transformed_person_1, transformed_person_2, ...]
+    """
+    all_transformed = []
+    for person_kps in persons_keypoints_list:
+        transformed_person = process_keypoints(
+            person_kps, cam_w, cam_h, win_w, win_h, conf_threshold
+        )
+        all_transformed.append(transformed_person)
+    return all_transformed

@@ -1,7 +1,7 @@
 """
 Módulo: pose_detector.py
 Descripción: Captura frames de la webcam en un hilo separado y procesa la estimación
-             de pose utilizando YOLOv8 pose de Ultralytics para evitar congelamientos en la UI de Pyglet.
+             de pose multi-persona utilizando YOLOv8 pose de Ultralytics.
 """
 
 import threading
@@ -11,29 +11,28 @@ from ultralytics import YOLO
 
 class PoseDetectorThread(threading.Thread):
     """
-    Hilo dedicado a la captura de cámara web y la inferencia del modelo YOLO pose.
+    Hilo dedicado a la captura de cámara web y la inferencia del modelo YOLO pose para múltiples personas.
     
     QUÉ HACE:
-        Lee continuamente frames de OpenCV cv2.VideoCapture, los procesa con yolov8n-pose.pt
-        y almacena el último conjunto de 17 keypoints extraídos en una estructura segura para subprocesos.
+        Lee continuamente frames de OpenCV cv2.VideoCapture, ejecuta YOLOv8 pose en tiempo real
+        y almacena una lista con los 17 keypoints de CADA persona detectada en el encuadre.
         
     POR QUÉ:
-        La inferencia de IA en CPU/GPU puede demorar entre 15ms y 50ms por frame. Ejecutarla en el hilo principal
-        de Pyglet provocaría fluctuaciones en los FPS y congelamientos en la renderización de la ventana.
+        Permite detectar N personas en simultáneo sin bloquear la interfaz gráfica de Pyglet.
     """
     def __init__(self, camera_index=0, model_path="yolov8n-pose.pt"):
         super().__init__()
-        self.daemon = True  # Permite que el hilo finalice si el programa principal se cierra
+        self.daemon = True
         self.camera_index = camera_index
         self.model_path = model_path
         
         self._lock = threading.Lock()
         self._running = False
         
-        # Variables compartidas de estado
-        self.latest_keypoints = []  # Lista de tuplas: [(x, y, confidence), ...] para los 17 puntos
-        self.frame_width = 640       # Valor por defecto (se actualiza con la cámara)
-        self.frame_height = 480      # Valor por defecto (se actualiza con la cámara)
+        # Estructura compartida de personas: [[(x,y,conf)_1..17], [(x,y,conf)_1..17], ...]
+        self.latest_persons_keypoints = []
+        self.frame_width = 640
+        self.frame_height = 480
         self.has_detection = False
         
         self.model = None
@@ -42,20 +41,14 @@ class PoseDetectorThread(threading.Thread):
     def run(self):
         """
         Bucle principal del hilo de procesamiento.
-        Carga el modelo e inicia el ciclo de lectura de cámara.
         """
-        # Cargar modelo YOLO pose
-        # QUÉ: Cargar yolov8n-pose.pt
-        # POR QUÉ: Es la variante nano de YOLOv8 pose, optimizada para ejecución rápida en tiempo real.
         self.model = YOLO(self.model_path)
         
-        # Inicializar cámara OpenCV
         self.cap = cv2.VideoCapture(self.camera_index)
         if not self.cap.isOpened():
             print(f"[ERROR] No se pudo abrir la cámara index {self.camera_index}")
             return
             
-        # Obtener dimensiones reales de la captura
         self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 640
         self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 480
         
@@ -66,46 +59,51 @@ class PoseDetectorThread(threading.Thread):
             if not ret or frame is None:
                 continue
                 
-            # Realizar inferencia de pose (verbose=False para evitar saturar la consola)
             results = self.model(frame, verbose=False)
             
-            keypoints_list = []
+            persons_list = []
             detection_found = False
             
             if results and len(results) > 0:
                 result = results[0]
-                # Verificar si se detectaron personas en el frame
+                # QUÉ: Extraer keypoints de TODAS las personas detectadas en la toma
+                # POR QUÉ: result.keypoints.xy tiene dimensiones (num_personas, 17, 2)
                 if result.keypoints is not None and len(result.keypoints) > 0:
-                    # Tomamos la primera persona detectada con mayor confianza
-                    xy_data = result.keypoints.xy[0].cpu().numpy()
-                    conf_data = result.keypoints.conf[0].cpu().numpy() if result.keypoints.conf is not None else None
+                    xy_all = result.keypoints.xy.cpu().numpy()
+                    conf_all = result.keypoints.conf.cpu().numpy() if result.keypoints.conf is not None else None
                     
-                    for i in range(len(xy_data)):
-                        x, y = xy_data[i]
-                        c = conf_data[i] if conf_data is not None else 1.0
-                        keypoints_list.append((float(x), float(y), float(c)))
+                    num_persons = len(xy_all)
+                    for p in range(num_persons):
+                        person_kps = []
+                        xy_person = xy_all[p]
+                        conf_person = conf_all[p] if conf_all is not None else None
+                        
+                        for i in range(len(xy_person)):
+                            x, y = xy_person[i]
+                            c = float(conf_person[i]) if conf_person is not None else 1.0
+                            person_kps.append((float(x), float(y), c))
+                            
+                        persons_list.append(person_kps)
                         
                     detection_found = True
 
-            # Actualizar datos compartidos utilizando el lock de seguridad
             with self._lock:
-                self.latest_keypoints = keypoints_list
+                self.latest_persons_keypoints = persons_list
                 self.has_detection = detection_found
 
-        # Liberar recursos al detener
         if self.cap:
             self.cap.release()
 
     def get_latest_data(self):
         """
-        Retorna una copia de los datos más recientes de detección.
+        Retorna los datos de detección multi-persona más recientes.
         
         Returns:
-            tuple: (keypoints_list, frame_width, frame_height, has_detection)
+            tuple: (persons_keypoints_list, frame_width, frame_height, has_detection)
         """
         with self._lock:
-            return list(self.latest_keypoints), self.frame_width, self.frame_height, self.has_detection
+            return list(self.latest_persons_keypoints), self.frame_width, self.frame_height, self.has_detection
 
     def stop(self):
-        """Detiene el hilo de procesamiento de forma limpia."""
+        """Detiene el hilo de procesamiento."""
         self._running = False
