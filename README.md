@@ -28,8 +28,8 @@ Aplicación interactiva en Python que captura la transmisión de una cámara web
 
 ### 1. Clonar o acceder al repositorio
 ```bash
-git clone <URL_DEL_REPOSITORIO>
-cd bwc_body_webcam_copy/Ver1
+git clone https://github.com/neptuso/BWC.git
+cd BWC/Ver1
 ```
 
 ### 2. Crear y activar el entorno virtual (`venv`)
