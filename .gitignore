@@ -1,0 +1,17 @@
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Archivos de caché de Python
+__pycache__/
+*.py[cod]
+
+# Modelos pesados de YOLO (se descargan automáticamente)
+yolov8n-pose.pt
+*.pt
+
+# IDEs y configuración local
+.vscode/
+.idea/
+.DS_Store
